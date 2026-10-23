@@ -21,11 +21,11 @@ jobs:
       - name: Checkout submodules
         run: git submodule update --init --recursive
 
-      - name: Setup Java 11
+      - name: Setup Java 17 (AGP 8.1.1)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 11
+          java-version: 17
           cache: gradle
 
       - name: Package game from main/ folder into game.love
@@ -35,9 +35,8 @@ jobs:
           cd main
           zip -r -X ../app/src/main/assets/game.love .
           cd ..
-          echo "=== game.love contents (root files) ==="
+          echo "=== game.love (root files) ==="
           unzip -l app/src/main/assets/game.love | head -15
-          echo "..."
           ls -la app/src/main/assets/
 
       - name: Fetch game.love from direct URL (fallback mode)
@@ -46,7 +45,29 @@ jobs:
           mkdir -p app/src/main/assets/
           curl -L# "${{ github.event.inputs.romURL }}" -o app/src/main/assets/game.love
 
-      - name: Build Release APK
+      - name: Prepare signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > release.keystore
+          else
+            if [ -z "$KS_PASSWORD" ]; then
+              KS_PASSWORD="ShadowHero$(date +%Y)Sign!"
+            fi
+            keytool -genkeypair -v \
+              -keystore release.keystore \
+              -alias shadowhero -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$KS_PASSWORD" -keypass "$KS_PASSWORD" \
+              -dname "CN=RealShadowHero, OU=SandS, O=SandSprogrammingGroup, L=Tehran, C=IR"
+          fi
+          echo "SIGNING_STORE_PATH=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$KS_PASSWORD" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_ALIAS=shadowhero" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_PASSWORD=$KS_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build Signed Release APK
         run: |
           chmod +x ./gradlew
           ./gradlew assembleNormal --no-daemon --stacktrace
@@ -66,5 +87,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: shadowhero-${{ steps.date.outputs.date }}
-          name: ShadowHero ${{ steps.date.outputs.date }}
+          name: ShadowHero Material ${{ steps.date.outputs.date }}
+          body: |
+            بیلد اندروید قهرمان سایه‌ای
+            - GUI با Material Design 3
+            - سازگار با Android 8 (API 26) تا Android 15
+            - APK امضاشده — قابل نصب مستقیم
           files: app/build/outputs/apk/normal/release/*.apk
